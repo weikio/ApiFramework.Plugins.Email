@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -22,20 +22,29 @@ namespace Weikio.ApiFramework.Plugins.Email
             _logger = logger;
         }
 
-        public async Task<bool> Create(Email email)
+        public async Task<EmailSendingResult> Create(Email email)
         {
             _allowedEmails = new HashSet<string>((Configuration.AllowedReceivers ?? new HashSet<string>()).Where(address => !address.StartsWith("@")));
             _allowedDomains = (Configuration.AllowedReceivers ?? new HashSet<string>()).Where(address => address.StartsWith("@")).ToList();
 
-            using (var msg = CreateMailMessage(email.EmailAddress, email.Subject, email.Message, email.HtmlMessage, false, email.Attachments))
+            try
             {
-                var result = await SendEmail(msg);
-            
-                return result;
+                using (var msg = CreateMailMessage(email.EmailAddress, email.Subject, email.Message, email.HtmlMessage, false, email.Attachments))
+                {
+                    var result = await SendEmail(msg);
+
+                    return result;
+                }
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create email message. {email}", email);
+                return new EmailSendingResult() { Success = false, ErrorMessage = ex.Message };
+            }
+
         }
 
-        private async Task<bool> SendEmail(MailMessage msg)
+        private async Task<EmailSendingResult> SendEmail(MailMessage msg)
         {
             try
             {
@@ -49,13 +58,13 @@ namespace Weikio.ApiFramework.Plugins.Email
                     }
                 }
 
-                return true;
+                return new EmailSendingResult() { Success = true };
             }
             catch (Exception e)
             {
                 _logger.LogError(e, "Failed to send email {Msg}", msg);
 
-                return false;
+                return new EmailSendingResult() { Success = false, ErrorMessage = e.Message };
             }
         }
 
@@ -128,15 +137,15 @@ namespace Weikio.ApiFramework.Plugins.Email
                 {
                     // This stream is automatically disposed when the MailMessage is disposed
                     var memStream = new MemoryStream(attachment.Content) { Position = 0 };
-                    
+
                     var contentType = MimeTypes.GetMimeType(attachment.Name);
                     var reportAttachment = new Attachment(memStream, contentType);
                     reportAttachment.ContentDisposition.FileName = attachment.Name;
-                    
+
                     result.Attachments.Add(reportAttachment);
                 }
             }
-            
+
             if (!string.IsNullOrWhiteSpace(Configuration.Bcc))
             {
                 var addresses = Configuration.Bcc.Split(new[] { ";", "," }, StringSplitOptions.RemoveEmptyEntries);
